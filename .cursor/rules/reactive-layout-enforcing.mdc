@@ -1,0 +1,6 @@
+---
+globs: **/*.tsx, **/*.ts, **/*.css
+alwaysApply: false
+---
+
+Whenever visual elements are created or modified, you need to ensure their layout is reactive, so the page layout looks good both on desktop and mobile screens.

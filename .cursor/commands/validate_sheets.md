@@ -1,0 +1,1 @@
+Your job is to check all the Google sheets listed in the sheetsConfig file, and validate that they exist, are accessible, and are in the correct format.
