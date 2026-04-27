@@ -24,6 +24,7 @@ import {
   purchasesPerYear,
   titlesByLocation,
   titlesOwnedPerPlatform,
+  ownedTitlesByPopularSeriesWithTitles,
 } from './analytics'
 import { PlatformIcon } from './platformIcon'
 
@@ -31,7 +32,7 @@ type LoadState =
   | { status: 'loading' }
   | { status: 'ready'; rows: ListingRow[]; errors: string[] }
 
-type PlatformSortKey = 'platform' | 'titles' | 'spent' | 'avgCost'
+type PlatformSortKey = 'platform' | 'titles' | 'inBerlin' | 'spent' | 'avgCost'
 type SortDir = 'asc' | 'desc'
 
 const LOCATION_PIE_COLORS = [
@@ -50,6 +51,10 @@ const LOCATION_PIE_COLORS = [
 export function Dashboard() {
   const [state, setState] = useState<LoadState>({ status: 'loading' })
   const [quickChecksOpen, setQuickChecksOpen] = useState(true)
+  const [openSeriesOverlay, setOpenSeriesOverlay] = useState<{
+    series: string
+    titles: { title: string; platform: string }[]
+  } | null>(null)
   const [platformSort, setPlatformSort] = useState<{ key: PlatformSortKey; dir: SortDir }>({
     key: 'platform',
     dir: 'asc',
@@ -88,10 +93,30 @@ export function Dashboard() {
   const platformTable = useMemo(() => platformSummary(rowsForMetrics), [rowsForMetrics])
   const yearDiag = useMemo(() => purchaseYearDiagnostics(rowsForMetrics), [rowsForMetrics])
   const byLocation = useMemo(() => titlesByLocation(rows), [rows])
+  const ownedBySeriesWithTitles = useMemo(
+    () => ownedTitlesByPopularSeriesWithTitles(rowsForMetrics),
+    [rowsForMetrics],
+  )
+  const ownedBySeriesSorted = useMemo(() => {
+    return [...ownedBySeriesWithTitles].sort((a, b) => {
+      const dc = b.ownedTitles - a.ownedTitles
+      if (dc !== 0) return dc
+      return a.series.localeCompare(b.series, undefined, { sensitivity: 'base' })
+    })
+  }, [ownedBySeriesWithTitles])
 
   useEffect(() => {
     setPiePointerTip(null)
   }, [byLocation])
+
+  useEffect(() => {
+    if (!openSeriesOverlay) return
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpenSeriesOverlay(null)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [openSeriesOverlay])
 
   const platformTableSorted = useMemo(() => {
     const dirMul = platformSort.dir === 'asc' ? 1 : -1
@@ -109,6 +134,9 @@ export function Dashboard() {
             break
           case 'titles':
             cmp = ra.titles - rb.titles
+            break
+          case 'inBerlin':
+            cmp = ra.inFinalLocation - rb.inFinalLocation
             break
           case 'spent':
             cmp = ra.spent - rb.spent
@@ -514,6 +542,15 @@ export function Dashboard() {
                           Avg cost / game {sortGlyph(platformSort, 'avgCost')}
                         </button>
                       </th>
+                      <th style={styles.thRight}>
+                        <button
+                          type="button"
+                          style={styles.thButtonRight}
+                          onClick={() => toggleSort(setPlatformSort, 'inBerlin')}
+                        >
+                          In Final Location {sortGlyph(platformSort, 'inBerlin')}
+                        </button>
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -530,8 +567,51 @@ export function Dashboard() {
                         <td style={styles.tdRight}>
                           {r.avgCost == null ? '—' : formatMoney(r.avgCost)}
                         </td>
+                        <td style={styles.tdRight}>
+                          {r.inFinalLocation}/{r.titles}
+                        </td>
                       </tr>
                     ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div style={styles.card}>
+              <div style={styles.cardTitle}>Popular series</div>
+              <div style={styles.tableWrap}>
+                <table style={styles.table}>
+                  <thead>
+                    <tr>
+                      <th style={styles.th}>Series</th>
+                      <th style={styles.thRight}>Owned titles</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ownedBySeriesSorted.map((r) => {
+                      const titles = r.titles ?? []
+                      return (
+                        <tr key={r.series}>
+                          <td style={styles.td}>
+                            <span>{r.series}</span>
+                          </td>
+                          <td style={styles.tdRight}>
+                            <div style={styles.seriesOwnedCell}>
+                              <span>{r.ownedTitles}</span>
+                              <button
+                                type="button"
+                                style={styles.seriesInspectButton}
+                                onClick={() => setOpenSeriesOverlay({ series: r.series, titles })}
+                                aria-label={`Show titles in series ${r.series}`}
+                                title="Show titles"
+                              >
+                                <MagnifierIcon />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -568,7 +648,71 @@ export function Dashboard() {
           </div>
         </>
       )}
+
+      {openSeriesOverlay ? (
+        <div
+          style={styles.overlayBackdrop}
+          onMouseDown={(e) => {
+            if (e.currentTarget === e.target) setOpenSeriesOverlay(null)
+          }}
+        >
+          <div style={styles.overlayCard} onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+            <div style={styles.overlayHeader}>
+              <div style={styles.overlayTitle}>{openSeriesOverlay.series}</div>
+              <button
+                type="button"
+                style={styles.overlayCloseButton}
+                onClick={() => setOpenSeriesOverlay(null)}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+            <div style={styles.overlayBody}>
+              {openSeriesOverlay.titles.length === 0 ? (
+                <div style={styles.overlayEmpty}>No matched titles.</div>
+              ) : (
+                <div style={styles.overlayList}>
+                  {openSeriesOverlay.titles.map((t, idx) => (
+                    <div key={`${t.title}-${t.platform}-${idx}`} style={styles.overlayListItem}>
+                      <div style={styles.overlayRow}>
+                        <div style={styles.overlayRowTitle}>{t.title}</div>
+                        <div style={styles.overlayRowPlatform}>{t.platform || '—'}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
+  )
+}
+
+function MagnifierIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <path
+        d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <path
+        d="M16.2 16.2 21 21"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </svg>
   )
 }
 
@@ -799,6 +943,124 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     gap: 10,
+  },
+  seriesCell: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    width: '100%',
+    minWidth: 240,
+  },
+  seriesOwnedCell: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 10,
+    width: '100%',
+  },
+  seriesInspectButton: {
+    appearance: 'none',
+    border: '1px solid rgba(232, 238, 252, 0.14)',
+    background: 'rgba(232, 238, 252, 0.06)',
+    color: 'rgba(232, 238, 252, 0.88)',
+    borderRadius: 10,
+    padding: '6px 8px',
+    cursor: 'pointer',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: '0 0 auto',
+  },
+  overlayBackdrop: {
+    position: 'fixed',
+    inset: 0,
+    background: 'rgba(0,0,0,0.55)',
+    zIndex: 50,
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    padding: 16,
+  },
+  overlayCard: {
+    width: 'min(520px, 92vw)',
+    maxHeight: 'min(520px, 72vh)',
+    overflow: 'hidden',
+    borderRadius: 16,
+    border: '1px solid rgba(232, 238, 252, 0.16)',
+    background: 'rgba(14, 20, 38, 0.98)',
+    boxShadow: '0 16px 50px rgba(0,0,0,0.5)',
+  },
+  overlayHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    padding: '12px 14px',
+    borderBottom: '1px solid rgba(232, 238, 252, 0.12)',
+  },
+  overlayTitle: {
+    fontSize: 14,
+    fontWeight: 700,
+    color: 'rgba(232, 238, 252, 0.92)',
+  },
+  overlayCloseButton: {
+    appearance: 'none',
+    border: '1px solid rgba(232, 238, 252, 0.14)',
+    background: 'rgba(232, 238, 252, 0.06)',
+    color: 'rgba(232, 238, 252, 0.88)',
+    borderRadius: 10,
+    width: 34,
+    height: 30,
+    cursor: 'pointer',
+    fontSize: 18,
+    lineHeight: '30px',
+  },
+  overlayBody: {
+    padding: 14,
+  },
+  overlayEmpty: {
+    fontSize: 13,
+    color: 'rgba(232, 238, 252, 0.7)',
+  },
+  overlayList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 8,
+    maxHeight: 'calc(min(520px, 72vh) - 72px)',
+    overflow: 'auto',
+    paddingRight: 6,
+  },
+  overlayListItem: {
+    fontSize: 13,
+    lineHeight: 1.35,
+    color: 'rgba(232, 238, 252, 0.92)',
+    border: '1px solid rgba(232, 238, 252, 0.10)',
+    background: 'rgba(232, 238, 252, 0.04)',
+    borderRadius: 12,
+    padding: '10px 12px',
+  },
+  overlayRow: {
+    display: 'flex',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  overlayRowTitle: {
+    flex: '1 1 auto',
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  overlayRowPlatform: {
+    flex: '0 0 auto',
+    fontSize: 12,
+    color: 'rgba(232, 238, 252, 0.78)',
+    border: '1px solid rgba(232, 238, 252, 0.12)',
+    background: 'rgba(232, 238, 252, 0.06)',
+    borderRadius: 999,
+    padding: '4px 8px',
   },
   mutedTitle: {
     fontSize: 12,

@@ -6,9 +6,23 @@ export type MoneyPerPlatformPoint = { platform: string; amount: number }
 export type CountPerPlatformPoint = { platform: string; count: number }
 /** Recharts pie: `name` + `value` */
 export type CountPerLocationPoint = { name: string; value: number }
+export type SeriesOwnedCountRow = { series: string; ownedTitles: number }
+export type SeriesOwnedTitlesRow = {
+  series: string
+  ownedTitles: number
+  titles: { title: string; platform: string }[]
+}
+/** City / shelf where the collection should live long-term (used in platform summary). */
+export const FINAL_COLLECTION_LOCATION = 'Berlin'
+
+export function isInFinalCollectionLocation(row: ListingRow): boolean {
+  return row.location.trim().toLowerCase() === FINAL_COLLECTION_LOCATION.toLowerCase()
+}
+
 export type PlatformSummaryRow = {
   platform: string
   titles: number
+  inFinalLocation: number
   spent: number
   avgCost: number | null
 }
@@ -179,11 +193,15 @@ export function titlesByLocation(rows: ListingRow[]): CountPerLocationPoint[] {
 
 export function platformSummary(rows: ListingRow[]): PlatformSummaryRow[] {
   const titles = new Map<string, number>()
+  const inFinal = new Map<string, number>()
   const spent = new Map<string, number>()
 
   for (const r of rows) {
     const platform = platformFromRow(r)
     titles.set(platform, (titles.get(platform) ?? 0) + 1)
+    if (isInFinalCollectionLocation(r)) {
+      inFinal.set(platform, (inFinal.get(platform) ?? 0) + 1)
+    }
 
     const p = parsePriceToNumber(r.price)
     if (p != null) {
@@ -200,6 +218,7 @@ export function platformSummary(rows: ListingRow[]): PlatformSummaryRow[] {
       return {
         platform,
         titles: t,
+        inFinalLocation: inFinal.get(platform) ?? 0,
         spent: s,
         avgCost: t > 0 ? s / t : null,
       }
@@ -228,5 +247,263 @@ export function purchaseYearDiagnostics(rows: ListingRow[]): PurchaseYearDiagnos
     unparsedRows: totalRows - parsedRows,
     sampleUnparsedValues: samples,
   }
+}
+
+function normalizeForSeriesMatch(s: string): string {
+  return s
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+}
+
+function includesAny(haystack: string, needles: string[]): boolean {
+  for (const n of needles) {
+    if (haystack.includes(n)) return true
+  }
+  return false
+}
+
+export function ownedTitlesByPopularSeries(rows: ListingRow[]): SeriesOwnedCountRow[] {
+  const mario = ['mario', 'luigi']
+  const marioExtended = [
+    ...mario,
+    'toad',
+    'donkey kong',
+    'peach',
+    'yoshi',
+    'wario',
+    'smash',
+    'smash bros',
+    'super smash',
+    'super smash bros',
+    'ssbu',
+  ]
+  const zelda = ['zelda', 'link', 'hyrule', 'triforce']
+  const pokemon = ['pokemon', 'pokken']
+  const finalFantasy = [
+    'final fantasy',
+    'theatrhythm',
+    'dissidia',
+    'crisis core',
+    'chocobo',
+    'stranger of paradise',
+    'world of final fantasy',
+  ]
+  const kirby = ['kirby']
+  const sonic = ['sonic']
+  const metroid = ['metroid']
+  const metalGear = ['metal gear']
+  const silentHill = ['silent hill']
+  const residentEvil = ['resident evil', 'biohazard']
+  const fifa = ['fifa']
+  const fatalFrame = ['fatal frame', 'project zero']
+  const halo = ['halo']
+  const gearsOfWar = ['gears of war', 'gears']
+  const callOfDuty = ['call of duty']
+  const yakuzaLikeADragon = ['yakuza', 'like a dragon', 'ryu ga gotoku']
+
+  const counts: SeriesOwnedCountRow[] = [
+    { series: 'Mario', ownedTitles: 0 },
+    { series: 'Mario (extended)', ownedTitles: 0 },
+    { series: 'Zelda', ownedTitles: 0 },
+    { series: 'Pokemon', ownedTitles: 0 },
+    { series: 'Final Fantasy', ownedTitles: 0 },
+    { series: 'Kirby', ownedTitles: 0 },
+    { series: 'Sonic', ownedTitles: 0 },
+    { series: 'Metroid', ownedTitles: 0 },
+    { series: 'Metal Gear', ownedTitles: 0 },
+    { series: 'Silent Hill', ownedTitles: 0 },
+    { series: 'Resident Evil', ownedTitles: 0 },
+    { series: 'Fifa', ownedTitles: 0 },
+    { series: 'Fatal Frame', ownedTitles: 0 },
+    { series: 'Halo', ownedTitles: 0 },
+    { series: 'Gears of War', ownedTitles: 0 },
+    { series: 'Call of Duty', ownedTitles: 0 },
+    { series: 'Yakuza / Like a Dragon', ownedTitles: 0 },
+  ]
+
+  for (const r of rows) {
+    const t = normalizeForSeriesMatch(r.title ?? '')
+    if (!t) continue
+
+    if (includesAny(t, mario)) counts[0].ownedTitles++
+    if (includesAny(t, marioExtended)) counts[1].ownedTitles++
+    if (includesAny(t, zelda)) counts[2].ownedTitles++
+    if (includesAny(t, pokemon)) counts[3].ownedTitles++
+    if (includesAny(t, finalFantasy)) counts[4].ownedTitles++
+    if (includesAny(t, kirby)) counts[5].ownedTitles++
+    if (includesAny(t, sonic)) counts[6].ownedTitles++
+    if (includesAny(t, metroid)) counts[7].ownedTitles++
+    if (includesAny(t, metalGear)) counts[8].ownedTitles++
+    if (includesAny(t, silentHill)) counts[9].ownedTitles++
+    if (includesAny(t, residentEvil)) counts[10].ownedTitles++
+    if (includesAny(t, fifa)) counts[11].ownedTitles++
+    if (includesAny(t, fatalFrame)) counts[12].ownedTitles++
+    if (includesAny(t, halo)) counts[13].ownedTitles++
+    if (includesAny(t, gearsOfWar)) counts[14].ownedTitles++
+    if (includesAny(t, callOfDuty)) counts[15].ownedTitles++
+    if (includesAny(t, yakuzaLikeADragon)) counts[16].ownedTitles++
+
+    // Special-case: "Zero" is only treated as Fatal Frame on Wii (not Wii U).
+    const p = normalizeForSeriesMatch(r.platform ?? r.source ?? '')
+    const isWii = p.includes('wii') && !p.includes('wii u')
+    if (isWii && t.includes('zero')) counts[12].ownedTitles++
+  }
+
+  return counts
+}
+
+export function ownedTitlesByPopularSeriesWithTitles(rows: ListingRow[]): SeriesOwnedTitlesRow[] {
+  const mario = ['mario', 'luigi']
+  const marioExtended = [
+    ...mario,
+    'toad',
+    'donkey kong',
+    'peach',
+    'yoshi',
+    'wario',
+    'smash',
+    'smash bros',
+    'super smash',
+    'super smash bros',
+    'ssbu',
+  ]
+  const zelda = ['zelda', 'link', 'hyrule', 'triforce']
+  const pokemon = ['pokemon', 'pokken']
+  const finalFantasy = [
+    'final fantasy',
+    'theatrhythm',
+    'dissidia',
+    'crisis core',
+    'chocobo',
+    'stranger of paradise',
+    'world of final fantasy',
+  ]
+  const kirby = ['kirby']
+  const sonic = ['sonic']
+  const metroid = ['metroid']
+  const metalGear = ['metal gear']
+  const silentHill = ['silent hill']
+  const residentEvil = ['resident evil', 'biohazard']
+  const fifa = ['fifa']
+  const fatalFrame = ['fatal frame', 'project zero']
+  const halo = ['halo']
+  const gearsOfWar = ['gears of war', 'gears']
+  const callOfDuty = ['call of duty']
+  const yakuzaLikeADragon = ['yakuza', 'like a dragon', 'ryu ga gotoku']
+
+  const seriesRows: SeriesOwnedTitlesRow[] = [
+    { series: 'Mario', ownedTitles: 0, titles: [] },
+    { series: 'Mario (extended)', ownedTitles: 0, titles: [] },
+    { series: 'Zelda', ownedTitles: 0, titles: [] },
+    { series: 'Pokemon', ownedTitles: 0, titles: [] },
+    { series: 'Final Fantasy', ownedTitles: 0, titles: [] },
+    { series: 'Kirby', ownedTitles: 0, titles: [] },
+    { series: 'Sonic', ownedTitles: 0, titles: [] },
+    { series: 'Metroid', ownedTitles: 0, titles: [] },
+    { series: 'Metal Gear', ownedTitles: 0, titles: [] },
+    { series: 'Silent Hill', ownedTitles: 0, titles: [] },
+    { series: 'Resident Evil', ownedTitles: 0, titles: [] },
+    { series: 'Fifa', ownedTitles: 0, titles: [] },
+    { series: 'Fatal Frame', ownedTitles: 0, titles: [] },
+    { series: 'Halo', ownedTitles: 0, titles: [] },
+    { series: 'Gears of War', ownedTitles: 0, titles: [] },
+    { series: 'Call of Duty', ownedTitles: 0, titles: [] },
+    { series: 'Yakuza / Like a Dragon', ownedTitles: 0, titles: [] },
+  ]
+
+  for (const r of rows) {
+    const rawTitle = String(r.title ?? '').trim()
+    const t = normalizeForSeriesMatch(rawTitle)
+    if (!t) continue
+    const platform = String(r.platform ?? r.source ?? '').trim()
+
+    if (includesAny(t, mario)) {
+      seriesRows[0].ownedTitles++
+      if (rawTitle) seriesRows[0].titles.push({ title: rawTitle, platform })
+    }
+    if (includesAny(t, marioExtended)) {
+      seriesRows[1].ownedTitles++
+      if (rawTitle) seriesRows[1].titles.push({ title: rawTitle, platform })
+    }
+    if (includesAny(t, zelda)) {
+      seriesRows[2].ownedTitles++
+      if (rawTitle) seriesRows[2].titles.push({ title: rawTitle, platform })
+    }
+    if (includesAny(t, pokemon)) {
+      seriesRows[3].ownedTitles++
+      if (rawTitle) seriesRows[3].titles.push({ title: rawTitle, platform })
+    }
+    if (includesAny(t, finalFantasy)) {
+      seriesRows[4].ownedTitles++
+      if (rawTitle) seriesRows[4].titles.push({ title: rawTitle, platform })
+    }
+    if (includesAny(t, kirby)) {
+      seriesRows[5].ownedTitles++
+      if (rawTitle) seriesRows[5].titles.push({ title: rawTitle, platform })
+    }
+    if (includesAny(t, sonic)) {
+      seriesRows[6].ownedTitles++
+      if (rawTitle) seriesRows[6].titles.push({ title: rawTitle, platform })
+    }
+    if (includesAny(t, metroid)) {
+      seriesRows[7].ownedTitles++
+      if (rawTitle) seriesRows[7].titles.push({ title: rawTitle, platform })
+    }
+    if (includesAny(t, metalGear)) {
+      seriesRows[8].ownedTitles++
+      if (rawTitle) seriesRows[8].titles.push({ title: rawTitle, platform })
+    }
+    if (includesAny(t, silentHill)) {
+      seriesRows[9].ownedTitles++
+      if (rawTitle) seriesRows[9].titles.push({ title: rawTitle, platform })
+    }
+    if (includesAny(t, residentEvil)) {
+      seriesRows[10].ownedTitles++
+      if (rawTitle) seriesRows[10].titles.push({ title: rawTitle, platform })
+    }
+    if (includesAny(t, fifa)) {
+      seriesRows[11].ownedTitles++
+      if (rawTitle) seriesRows[11].titles.push({ title: rawTitle, platform })
+    }
+    if (includesAny(t, fatalFrame)) {
+      seriesRows[12].ownedTitles++
+      if (rawTitle) seriesRows[12].titles.push({ title: rawTitle, platform })
+    }
+    if (includesAny(t, halo)) {
+      seriesRows[13].ownedTitles++
+      if (rawTitle) seriesRows[13].titles.push({ title: rawTitle, platform })
+    }
+    if (includesAny(t, gearsOfWar)) {
+      seriesRows[14].ownedTitles++
+      if (rawTitle) seriesRows[14].titles.push({ title: rawTitle, platform })
+    }
+    if (includesAny(t, callOfDuty)) {
+      seriesRows[15].ownedTitles++
+      if (rawTitle) seriesRows[15].titles.push({ title: rawTitle, platform })
+    }
+    if (includesAny(t, yakuzaLikeADragon)) {
+      seriesRows[16].ownedTitles++
+      if (rawTitle) seriesRows[16].titles.push({ title: rawTitle, platform })
+    }
+
+    // Special-case: "Zero" is only treated as Fatal Frame on Wii (not Wii U).
+    const p = normalizeForSeriesMatch(platform)
+    const isWii = p.includes('wii') && !p.includes('wii u')
+    if (isWii && t.includes('zero')) {
+      seriesRows[12].ownedTitles++
+      if (rawTitle) seriesRows[12].titles.push({ title: rawTitle, platform })
+    }
+  }
+
+  for (const s of seriesRows) {
+    s.titles.sort((a, b) => {
+      const tc = a.title.localeCompare(b.title, undefined, { sensitivity: 'base' })
+      if (tc !== 0) return tc
+      return a.platform.localeCompare(b.platform, undefined, { sensitivity: 'base' })
+    })
+  }
+
+  return seriesRows
 }
 
