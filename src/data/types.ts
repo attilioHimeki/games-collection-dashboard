@@ -1,3 +1,5 @@
+export type ListingKind = 'game' | 'console'
+
 export type ListingRow = {
   id: string
   title: string
@@ -11,6 +13,7 @@ export type ListingRow = {
   lastSeen: string
   source: string
   platform: string
+  kind: ListingKind
 }
 
 export const REQUIRED_COLUMNS = [

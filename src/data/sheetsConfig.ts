@@ -1,3 +1,5 @@
+import type { ListingKind } from './types'
+
 export type GoogleSheetSource = {
   /**
    * Spreadsheet id from:
@@ -13,6 +15,10 @@ export type GoogleSheetSource = {
    * Optional label used in logs/errors.
    */
   label?: string
+  /**
+   * Kind of listing this sheet contains. Defaults to 'game'.
+   */
+  kind?: ListingKind
 }
 
 /**
@@ -50,7 +56,17 @@ function parseGoogleSheetSources(raw: unknown): GoogleSheetSource[] {
     const spreadsheetId = o.spreadsheetId.trim()
     const sheetName = typeof o.sheetName === 'string' ? o.sheetName : undefined
     const label = typeof o.label === 'string' ? o.label : undefined
-    out.push({ spreadsheetId, sheetName, label })
+    let kind: ListingKind | undefined
+    if (typeof o.kind === 'string') {
+      if (o.kind === 'game' || o.kind === 'console') {
+        kind = o.kind
+      } else {
+        throw new Error(
+          `google-sheets-sources.json: entry ${i} has invalid kind "${o.kind}" (must be "game" or "console")`,
+        )
+      }
+    }
+    out.push({ spreadsheetId, sheetName, label, kind })
   }
   return out
 }

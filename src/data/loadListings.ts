@@ -1,6 +1,6 @@
 import Papa from 'papaparse'
 import { loadGoogleSheetsSources, type GoogleSheetSource } from './sheetsConfig'
-import { REQUIRED_COLUMNS, type ListingRow, type RequiredColumn } from './types'
+import { REQUIRED_COLUMNS, type ListingKind, type ListingRow, type RequiredColumn } from './types'
 
 export type LoadResult = {
   rows: ListingRow[]
@@ -57,6 +57,7 @@ function mapRow(
   raw: Record<string, unknown>,
   source: string,
   platform: string,
+  kind: ListingKind,
   col: Record<RequiredColumn, string>,
 ): ListingRow {
   const get = (k: RequiredColumn) => String(raw[col[k]] ?? '').trim()
@@ -73,6 +74,7 @@ function mapRow(
     lastSeen: get('Last Seen'),
     source,
     platform,
+    kind,
   }
 }
 
@@ -116,6 +118,7 @@ export async function loadListingsOnce(): Promise<LoadResult> {
       googleSources.map(async (src) => {
         const label = sourceLabel(src)
         const platform = sourcePlatform(src)
+        const kind: ListingKind = src.kind ?? 'game'
         const url = toCsvUrl(src)
         const report: SourceLoadReport = { label, platform, url, rowCount: 0 }
         try {
@@ -156,7 +159,7 @@ export async function loadListingsOnce(): Promise<LoadResult> {
             // Ignore completely empty rows.
             const hasAny = Object.values(r).some((v) => String(v ?? '').trim() !== '')
             if (!hasAny) continue
-            rows.push(mapRow(r, label, platform, col))
+            rows.push(mapRow(r, label, platform, kind, col))
             added++
           }
           report.rowCount = added

@@ -2,6 +2,7 @@ import type { ListingRow } from '../data/types'
 
 export type PurchasesPerYearPoint = { year: string; count: number }
 export type MoneyPerYearPoint = { year: number; amount: number }
+export type MoneyPerYearByKindPoint = { year: string; games: number; consoles: number }
 export type MoneyPerPlatformPoint = { platform: string; amount: number }
 export type CountPerPlatformPoint = { platform: string; count: number }
 /** Recharts pie: `name` + `value` */
@@ -11,6 +12,12 @@ export type SeriesOwnedTitlesRow = {
   series: string
   ownedTitles: number
   titles: { title: string; platform: string }[]
+}
+export type LastSeenMaintenanceRow = {
+  title: string
+  platform: string
+  lastSeen: string
+  parsedDate: Date | null
 }
 /** City / shelf where the collection should live long-term (used in platform summary). */
 export const FINAL_COLLECTION_LOCATION = 'Berlin'
@@ -97,6 +104,80 @@ function parsePurchaseYear(raw: string): number | null {
   return null
 }
 
+function parseFullDate(raw: string): Date | null {
+  const s = raw.trim()
+  if (!s) return null
+
+  if (/^\d{4,6}$/.test(s)) {
+    const d = excelSerialToDate(Number(s))
+    if (d) return d
+  }
+
+  const iso = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/)
+  if (iso) {
+    const dt = new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]))
+    if (!Number.isNaN(dt.getTime())) return dt
+  }
+
+  const us = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/)
+  if (us) {
+    const dt = new Date(Number(us[3]), Number(us[1]) - 1, Number(us[2]))
+    if (!Number.isNaN(dt.getTime())) return dt
+  }
+
+  const us2 = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2})$/)
+  if (us2) {
+    const y = expandTwoDigitYear(Number(us2[3]))
+    const dt = new Date(y, Number(us2[1]) - 1, Number(us2[2]))
+    if (!Number.isNaN(dt.getTime())) return dt
+  }
+
+  const yr = s.match(/^(\d{4})$/)
+  if (yr) {
+    const y = Number(yr[1])
+    if (y >= 1970 && y <= 2100) return new Date(y, 0, 1)
+  }
+
+  const dt = new Date(s)
+  if (!Number.isNaN(dt.getTime())) return dt
+  return null
+}
+
+export function lastSeenMaintenance(
+  rows: ListingRow[],
+  now: Date = new Date(),
+): LastSeenMaintenanceRow[] {
+  const cutoff = new Date(now)
+  cutoff.setFullYear(cutoff.getFullYear() - 1)
+
+  const result: LastSeenMaintenanceRow[] = []
+  for (const r of rows) {
+    const raw = String(r.lastSeen ?? '').trim()
+    const parsedDate = parseFullDate(raw)
+    if (!raw || parsedDate == null || parsedDate < cutoff) {
+      result.push({
+        title: r.title,
+        platform: r.platform || r.source,
+        lastSeen: raw,
+        parsedDate,
+      })
+    }
+  }
+
+  result.sort((a, b) => {
+    const aMissing = a.parsedDate == null
+    const bMissing = b.parsedDate == null
+    if (aMissing && !bMissing) return -1
+    if (!aMissing && bMissing) return 1
+    if (aMissing && bMissing) {
+      return a.title.localeCompare(b.title, undefined, { sensitivity: 'base' })
+    }
+    return (a.parsedDate as Date).getTime() - (b.parsedDate as Date).getTime()
+  })
+
+  return result
+}
+
 export function purchasesPerYear(rows: ListingRow[]): PurchasesPerYearPoint[] {
   const counts = new Map<number, number>()
   let noDate = 0
@@ -153,6 +234,39 @@ export function moneySpentPerYear(rows: ListingRow[]): MoneyPerYearPoint[] {
   return [...totals.entries()]
     .sort((a, b) => a[0] - b[0])
     .map(([year, amount]) => ({ year, amount }))
+}
+
+export function moneySpentPerYearByKind(rows: ListingRow[]): MoneyPerYearByKindPoint[] {
+  const games = new Map<number, number>()
+  const consoles = new Map<number, number>()
+  let noDateGames = 0
+  let noDateConsoles = 0
+  for (const r of rows) {
+    const p = parsePriceToNumber(r.price)
+    if (p == null) continue
+    const y = parsePurchaseYear(r.purchaseDate)
+    if (y == null) {
+      if (r.kind === 'console') noDateConsoles += p
+      else noDateGames += p
+      continue
+    }
+    const bucket = r.kind === 'console' ? consoles : games
+    bucket.set(y, (bucket.get(y) ?? 0) + p)
+  }
+  const years = new Set<number>([...games.keys(), ...consoles.keys()])
+  const points: MoneyPerYearByKindPoint[] = [...years]
+    .sort((a, b) => a - b)
+    .map((year) => ({
+      year: String(year),
+      games: games.get(year) ?? 0,
+      consoles: consoles.get(year) ?? 0,
+    }))
+
+  if (noDateGames > 0 || noDateConsoles > 0) {
+    points.unshift({ year: 'No date', games: noDateGames, consoles: noDateConsoles })
+  }
+
+  return points
 }
 
 export function moneySpentPerPlatform(rows: ListingRow[]): MoneyPerPlatformPoint[] {

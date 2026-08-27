@@ -15,8 +15,9 @@ import {
 import type { ListingRow } from '../data/types'
 import { loadListingsOnce } from '../data/loadListings'
 import {
+  lastSeenMaintenance,
   moneySpentPerPlatform,
-  moneySpentPerYear,
+  moneySpentPerYearByKind,
   platformSummary,
   isBlankLocation,
   isMissingLocationEntry,
@@ -34,6 +35,35 @@ type LoadState =
 
 type PlatformSortKey = 'platform' | 'titles' | 'inBerlin' | 'spent' | 'avgCost'
 type SortDir = 'asc' | 'desc'
+type TabKey = 'collection' | 'maintenance'
+
+const TABS: { key: TabKey; label: string }[] = [
+  { key: 'collection', label: 'Collection Overview' },
+  { key: 'maintenance', label: 'Maintenance' },
+]
+
+type FoldSectionKey =
+  | 'titlesPerYear'
+  | 'gamesByLocation'
+  | 'moneyPerYear'
+  | 'moneyPerPlatform'
+  | 'titlesOwnedPerPlatform'
+  | 'platformSummary'
+  | 'popularSeries'
+  | 'lastSeenMaintenance'
+  | 'quickChecks'
+
+const initialFoldOpen: Record<FoldSectionKey, boolean> = {
+  titlesPerYear: true,
+  gamesByLocation: true,
+  moneyPerYear: true,
+  moneyPerPlatform: true,
+  titlesOwnedPerPlatform: true,
+  platformSummary: true,
+  popularSeries: true,
+  lastSeenMaintenance: true,
+  quickChecks: true,
+}
 
 const LOCATION_PIE_COLORS = [
   '#7c5cff',
@@ -50,7 +80,15 @@ const LOCATION_PIE_COLORS = [
 
 export function Dashboard() {
   const [state, setState] = useState<LoadState>({ status: 'loading' })
-  const [quickChecksOpen, setQuickChecksOpen] = useState(true)
+  const [activeTab, setActiveTab] = useState<TabKey>('collection')
+  const [foldOpen, setFoldOpen] = useState<Record<FoldSectionKey, boolean>>(() => ({ ...initialFoldOpen }))
+  const onFoldToggle =
+    (key: FoldSectionKey) => (e: React.SyntheticEvent<HTMLDetailsElement>) => {
+      const el = e.currentTarget
+      if (!el) return
+      const nextOpen = el.open
+      setFoldOpen((prev) => ({ ...prev, [key]: nextOpen }))
+    }
   const [openSeriesOverlay, setOpenSeriesOverlay] = useState<{
     series: string
     titles: { title: string; platform: string }[]
@@ -82,12 +120,19 @@ export function Dashboard() {
   const errors = state.status === 'ready' ? state.errors : []
 
   const rowsForMetrics = useMemo(
+    () => rows.filter((r) => !isMissingLocationEntry(r) && r.kind !== 'console'),
+    [rows],
+  )
+  const rowsForSpendByKind = useMemo(
     () => rows.filter((r) => !isMissingLocationEntry(r)),
     [rows],
   )
 
   const perYear = useMemo(() => purchasesPerYear(rowsForMetrics), [rowsForMetrics])
-  const spentPerYear = useMemo(() => moneySpentPerYear(rowsForMetrics), [rowsForMetrics])
+  const spentPerYear = useMemo(
+    () => moneySpentPerYearByKind(rowsForSpendByKind),
+    [rowsForSpendByKind],
+  )
   const spentPerPlatform = useMemo(() => moneySpentPerPlatform(rowsForMetrics), [rowsForMetrics])
   const ownedPerPlatform = useMemo(() => titlesOwnedPerPlatform(rowsForMetrics), [rowsForMetrics])
   const platformTable = useMemo(() => platformSummary(rowsForMetrics), [rowsForMetrics])
@@ -104,6 +149,14 @@ export function Dashboard() {
       return a.series.localeCompare(b.series, undefined, { sensitivity: 'base' })
     })
   }, [ownedBySeriesWithTitles])
+
+  const lastSeenRows = useMemo(() => lastSeenMaintenance(rowsForMetrics), [rowsForMetrics])
+
+  const popularSeriesColumns = useMemo(() => {
+    const s = ownedBySeriesSorted
+    const mid = Math.ceil(s.length / 2)
+    return { left: s.slice(0, mid), right: s.slice(mid) }
+  }, [ownedBySeriesSorted])
 
   useEffect(() => {
     setPiePointerTip(null)
@@ -166,10 +219,15 @@ export function Dashboard() {
     () => perYear.reduce((sum, p) => sum + p.count, 0),
     [perYear],
   )
-  const totalSpentAllYears = useMemo(
-    () => spentPerYear.reduce((sum, p) => sum + p.amount, 0),
+  const totalSpentGamesAllYears = useMemo(
+    () => spentPerYear.reduce((sum, p) => sum + p.games, 0),
     [spentPerYear],
   )
+  const totalSpentConsolesAllYears = useMemo(
+    () => spentPerYear.reduce((sum, p) => sum + p.consoles, 0),
+    [spentPerYear],
+  )
+  const totalSpentAllYears = totalSpentGamesAllYears + totalSpentConsolesAllYears
   const totalSpentAllPlatforms = useMemo(
     () => spentPerPlatform.reduce((sum, p) => sum + p.amount, 0),
     [spentPerPlatform],
@@ -203,7 +261,7 @@ export function Dashboard() {
             <div style={styles.badgeValue}>
               {state.status === 'loading'
                 ? '…'
-                : new Set(rows.map((r) => r.source)).size}
+                : new Set(rows.filter((r) => r.kind !== 'console').map((r) => r.source)).size}
             </div>
           </div>
         </div>
@@ -229,9 +287,36 @@ export function Dashboard() {
             </div>
           )}
 
+          <div role="tablist" aria-label="Dashboard sections" style={styles.tabBar}>
+            {TABS.map((t) => {
+              const selected = activeTab === t.key
+              return (
+                <button
+                  key={t.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={selected}
+                  onClick={() => setActiveTab(t.key)}
+                  style={selected ? { ...styles.tabButton, ...styles.tabButtonActive } : styles.tabButton}
+                >
+                  {t.label}
+                </button>
+              )
+            })}
+          </div>
+
+          {activeTab === 'collection' ? (
+          <>
           <div className="dashboard-top-grid">
-            <div style={styles.card}>
-              <div style={styles.cardTitle}>Titles purchased per year</div>
+            <details
+              style={styles.card}
+              open={foldOpen.titlesPerYear}
+              onToggle={onFoldToggle('titlesPerYear')}
+            >
+              <summary style={styles.summary}>
+                <span style={styles.cardTitle}>Titles purchased per year</span>
+                <span style={styles.summaryHint}>{foldOpen.titlesPerYear ? 'Hide' : 'Show'}</span>
+              </summary>
               <div style={styles.chartWrap}>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={perYear} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
@@ -266,10 +351,17 @@ export function Dashboard() {
                 <div style={styles.footerTotalLabel}>Total titles (all years)</div>
                 <div style={styles.footerTotalValue}>{totalTitlesPurchasedAllYears}</div>
               </div>
-            </div>
+            </details>
 
-            <div style={styles.card}>
-              <div style={styles.cardTitle}>Games by location</div>
+            <details
+              style={styles.card}
+              open={foldOpen.gamesByLocation}
+              onToggle={onFoldToggle('gamesByLocation')}
+            >
+              <summary style={styles.summary}>
+                <span style={styles.cardTitle}>Games by location</span>
+                <span style={styles.summaryHint}>{foldOpen.gamesByLocation ? 'Hide' : 'Show'}</span>
+              </summary>
               <div style={styles.chartWrap}>
                 {byLocation.length === 0 ? (
                   <div style={styles.chartEmpty}>No games to chart.</div>
@@ -358,13 +450,20 @@ export function Dashboard() {
                   </div>
                 )}
               </div>
-            </div>
+            </details>
           </div>
 
           <div style={{ height: 14 }} />
 
-          <div style={styles.card}>
-            <div style={styles.cardTitle}>Money spent per year</div>
+          <details
+            style={styles.card}
+            open={foldOpen.moneyPerYear}
+            onToggle={onFoldToggle('moneyPerYear')}
+          >
+            <summary style={styles.summary}>
+              <span style={styles.cardTitle}>Money spent per year</span>
+              <span style={styles.summaryHint}>{foldOpen.moneyPerYear ? 'Hide' : 'Show'}</span>
+            </summary>
             <div style={styles.chartWrapWide}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart
@@ -393,23 +492,60 @@ export function Dashboard() {
                     }}
                     labelStyle={{ color: 'rgba(232, 238, 252, 0.8)' }}
                     cursor={{ fill: 'rgba(232, 238, 252, 0.06)' }}
-                    formatter={(value) => [formatMoney(Number(value)), 'Spent']}
+                    formatter={(value, name) => [formatMoney(Number(value)), String(name)]}
                   />
-                  <Bar dataKey="amount" fill="#23d5ab" radius={[10, 10, 2, 2]} />
+                  <Legend
+                    verticalAlign="top"
+                    height={28}
+                    formatter={(value) => (
+                      <span style={{ color: 'rgba(232, 238, 252, 0.82)', fontSize: 12 }}>
+                        {value}
+                      </span>
+                    )}
+                  />
+                  <Bar
+                    dataKey="games"
+                    name="Games"
+                    stackId="spend"
+                    fill="#23d5ab"
+                    radius={[0, 0, 2, 2]}
+                  />
+                  <Bar
+                    dataKey="consoles"
+                    name="Consoles"
+                    stackId="spend"
+                    fill="#ffb454"
+                    radius={[10, 10, 0, 0]}
+                  />
                 </BarChart>
               </ResponsiveContainer>
+            </div>
+            <div style={styles.footerTotalRow}>
+              <div style={styles.footerTotalLabel}>Total spent on games (all years)</div>
+              <div style={styles.footerTotalValue}>{formatMoney(totalSpentGamesAllYears)}</div>
+            </div>
+            <div style={styles.footerTotalRow}>
+              <div style={styles.footerTotalLabel}>Total spent on consoles (all years)</div>
+              <div style={styles.footerTotalValue}>{formatMoney(totalSpentConsolesAllYears)}</div>
             </div>
             <div style={styles.footerTotalRow}>
               <div style={styles.footerTotalLabel}>Total spent (all years)</div>
               <div style={styles.footerTotalValue}>{formatMoney(totalSpentAllYears)}</div>
             </div>
-          </div>
+          </details>
 
           <div style={{ height: 14 }} />
 
           <div style={styles.stack}>
-            <div style={styles.card}>
-              <div style={styles.cardTitle}>Money spent per platform</div>
+            <details
+              style={styles.card}
+              open={foldOpen.moneyPerPlatform}
+              onToggle={onFoldToggle('moneyPerPlatform')}
+            >
+              <summary style={styles.summary}>
+                <span style={styles.cardTitle}>Money spent per platform</span>
+                <span style={styles.summaryHint}>{foldOpen.moneyPerPlatform ? 'Hide' : 'Show'}</span>
+              </summary>
               <div style={{ ...styles.chartWrapWide, height: platformChartHeight }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
@@ -452,10 +588,19 @@ export function Dashboard() {
                 <div style={styles.footerTotalLabel}>Total spent (all platforms)</div>
                 <div style={styles.footerTotalValue}>{formatMoney(totalSpentAllPlatforms)}</div>
               </div>
-            </div>
+            </details>
 
-            <div style={styles.card}>
-              <div style={styles.cardTitle}>Titles owned per platform</div>
+            <details
+              style={styles.card}
+              open={foldOpen.titlesOwnedPerPlatform}
+              onToggle={onFoldToggle('titlesOwnedPerPlatform')}
+            >
+              <summary style={styles.summary}>
+                <span style={styles.cardTitle}>Titles owned per platform</span>
+                <span style={styles.summaryHint}>
+                  {foldOpen.titlesOwnedPerPlatform ? 'Hide' : 'Show'}
+                </span>
+              </summary>
               <div style={{ ...styles.chartWrapWide, height: platformChartHeight }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
@@ -498,10 +643,17 @@ export function Dashboard() {
                 <div style={styles.footerTotalLabel}>Total titles (all platforms)</div>
                 <div style={styles.footerTotalValue}>{totalTitlesOwnedAllPlatforms}</div>
               </div>
-            </div>
+            </details>
 
-            <div style={styles.card}>
-              <div style={styles.cardTitle}>Platform summary</div>
+            <details
+              style={styles.card}
+              open={foldOpen.platformSummary}
+              onToggle={onFoldToggle('platformSummary')}
+            >
+              <summary style={styles.summary}>
+                <span style={styles.cardTitle}>Platform summary</span>
+                <span style={styles.summaryHint}>{foldOpen.platformSummary ? 'Hide' : 'Show'}</span>
+              </summary>
               <div style={styles.tableWrap}>
                 <table style={styles.table}>
                   <thead>
@@ -575,56 +727,126 @@ export function Dashboard() {
                   </tbody>
                 </table>
               </div>
-            </div>
-
-            <div style={styles.card}>
-              <div style={styles.cardTitle}>Popular series</div>
-              <div style={styles.tableWrap}>
-                <table style={styles.table}>
-                  <thead>
-                    <tr>
-                      <th style={styles.th}>Series</th>
-                      <th style={styles.thRight}>Owned titles</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {ownedBySeriesSorted.map((r) => {
-                      const titles = r.titles ?? []
-                      return (
-                        <tr key={r.series}>
-                          <td style={styles.td}>
-                            <span>{r.series}</span>
-                          </td>
-                          <td style={styles.tdRight}>
-                            <div style={styles.seriesOwnedCell}>
-                              <span>{r.ownedTitles}</span>
-                              <button
-                                type="button"
-                                style={styles.seriesInspectButton}
-                                onClick={() => setOpenSeriesOverlay({ series: r.series, titles })}
-                                aria-label={`Show titles in series ${r.series}`}
-                                title="Show titles"
-                              >
-                                <MagnifierIcon />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+            </details>
 
             <details
               style={styles.card}
-              open={quickChecksOpen}
-              onToggle={(e) => setQuickChecksOpen((e.currentTarget as HTMLDetailsElement).open)}
+              open={foldOpen.popularSeries}
+              onToggle={onFoldToggle('popularSeries')}
+            >
+              <summary style={styles.summary}>
+                <span style={styles.cardTitle}>Popular series</span>
+                <span style={styles.summaryHint}>{foldOpen.popularSeries ? 'Hide' : 'Show'}</span>
+              </summary>
+              <div className="popular-series-grid">
+                {[popularSeriesColumns.left, popularSeriesColumns.right].map((columnRows, colIdx) => {
+                  if (colIdx === 1 && columnRows.length === 0) return null
+                  return (
+                    <div key={colIdx === 0 ? 'popular-series-a' : 'popular-series-b'} style={styles.tableWrap}>
+                      <table style={styles.table}>
+                        <thead>
+                          <tr>
+                            <th style={styles.th}>Series</th>
+                            <th style={styles.thRight}>Owned titles</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {columnRows.map((r) => {
+                            const titles = r.titles ?? []
+                            return (
+                              <tr key={r.series}>
+                                <td style={styles.td}>
+                                  <span>{r.series}</span>
+                                </td>
+                                <td style={styles.tdRight}>
+                                  <div style={styles.seriesOwnedCell}>
+                                    <span>{r.ownedTitles}</span>
+                                    <button
+                                      type="button"
+                                      style={styles.seriesInspectButton}
+                                      onClick={() => setOpenSeriesOverlay({ series: r.series, titles })}
+                                      aria-label={`Show titles in series ${r.series}`}
+                                      title="Show titles"
+                                    >
+                                      <MagnifierIcon />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )
+                })}
+              </div>
+            </details>
+          </div>
+          </>
+          ) : (
+          <div style={styles.stack}>
+            <details
+              style={styles.card}
+              open={foldOpen.lastSeenMaintenance}
+              onToggle={onFoldToggle('lastSeenMaintenance')}
+            >
+              <summary style={styles.summary}>
+                <span style={styles.cardTitle}>Last Seen Maintenance</span>
+                <span style={styles.summaryHint}>
+                  {foldOpen.lastSeenMaintenance ? 'Hide' : 'Show'}
+                </span>
+              </summary>
+              {lastSeenRows.length === 0 ? (
+                <div style={styles.overlayEmpty}>All titles have been seen within the past year.</div>
+              ) : (
+                <div
+                  style={
+                    lastSeenRows.length > 15
+                      ? { ...styles.tableWrap, ...styles.tableWrapScroll }
+                      : styles.tableWrap
+                  }
+                >
+                  <table style={styles.table}>
+                    <thead>
+                      <tr>
+                        <th style={styles.thSticky}>Title</th>
+                        <th style={styles.thSticky}>Platform</th>
+                        <th style={styles.thSticky}>Last Seen</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {lastSeenRows.map((r, idx) => (
+                        <tr key={`${r.title}-${r.platform}-${idx}`}>
+                          <td style={styles.td}>{r.title || '—'}</td>
+                          <td style={styles.td}>{r.platform || '—'}</td>
+                          <td style={styles.td}>
+                            {r.parsedDate
+                              ? formatLastSeen(r.parsedDate)
+                              : r.lastSeen
+                                ? r.lastSeen
+                                : 'Missing'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <div style={styles.footerTotalRow}>
+                <div style={styles.footerTotalLabel}>Titles needing a check</div>
+                <div style={styles.footerTotalValue}>{lastSeenRows.length}</div>
+              </div>
+            </details>
+
+            <details
+              style={styles.card}
+              open={foldOpen.quickChecks}
+              onToggle={onFoldToggle('quickChecks')}
             >
               <summary style={styles.summary}>
                 <span style={styles.cardTitle}>Quick checks</span>
-                <span style={styles.summaryHint}>{quickChecksOpen ? 'Hide' : 'Show'}</span>
+                <span style={styles.summaryHint}>{foldOpen.quickChecks ? 'Hide' : 'Show'}</span>
               </summary>
               <div style={styles.kv}>
                 <div style={styles.k}>Rows missing a purchase date</div>
@@ -646,6 +868,7 @@ export function Dashboard() {
               )}
             </details>
           </div>
+          )}
         </>
       )}
 
@@ -728,6 +951,15 @@ function formatMoneyTick(n: number): string {
   return String(Math.round(n))
 }
 
+const lastSeenFmt = new Intl.DateTimeFormat(undefined, {
+  year: 'numeric',
+  month: 'short',
+  day: '2-digit',
+})
+function formatLastSeen(d: Date): string {
+  return lastSeenFmt.format(d)
+}
+
 function sortGlyph(sort: { key: PlatformSortKey; dir: SortDir }, key: PlatformSortKey): string {
   if (sort.key !== key) return ''
   return sort.dir === 'asc' ? '↑' : '↓'
@@ -791,6 +1023,33 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: 'column',
     gap: 14,
     alignItems: 'stretch',
+  },
+  tabBar: {
+    display: 'flex',
+    gap: 6,
+    padding: 4,
+    marginBottom: 14,
+    borderRadius: 14,
+    border: '1px solid rgba(232, 238, 252, 0.14)',
+    background: 'rgba(14, 20, 38, 0.6)',
+    width: 'fit-content',
+    flexWrap: 'wrap',
+  },
+  tabButton: {
+    appearance: 'none',
+    border: '1px solid transparent',
+    background: 'transparent',
+    color: 'rgba(232, 238, 252, 0.72)',
+    padding: '8px 14px',
+    borderRadius: 10,
+    cursor: 'pointer',
+    fontSize: 13,
+    fontWeight: 500,
+  },
+  tabButtonActive: {
+    background: 'rgba(124, 92, 255, 0.18)',
+    border: '1px solid rgba(124, 92, 255, 0.55)',
+    color: '#e8eefc',
   },
   card: {
     borderRadius: 18,
@@ -900,6 +1159,22 @@ const styles: Record<string, React.CSSProperties> = {
     overflowX: 'auto',
     borderRadius: 14,
     border: '1px solid rgba(232, 238, 252, 0.12)',
+  },
+  tableWrapScroll: {
+    maxHeight: 620,
+    overflowY: 'auto',
+  },
+  thSticky: {
+    textAlign: 'left',
+    fontSize: 12,
+    color: 'rgba(232, 238, 252, 0.7)',
+    padding: '14px 18px',
+    background: 'rgba(20, 26, 44, 0.98)',
+    borderBottom: '1px solid rgba(232, 238, 252, 0.1)',
+    whiteSpace: 'nowrap',
+    position: 'sticky',
+    top: 0,
+    zIndex: 1,
   },
   table: {
     width: '100%',
